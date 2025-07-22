@@ -24,13 +24,12 @@ export default async function handler(req, res) {
     // Convert timestamp from Unix to ISO format
     const isoTimestamp = new Date(timestamp).toISOString();
     
-    // Create title and content - separate them properly
+    // Create content only - no title needed
     const personName = `${firstName} ${lastName}`.trim();
     const agentName = payload.contact?.assignee?.firstName || 'Abogados Catrachos USA';
     
-    // Put the entire message as the title - no separate content
-    // This should make it display directly visible like manual entries
-    const title = messageText || 'No message content';
+    // Put the full message in content for expandable "Read more"
+    const content = messageText || 'No message content';
     
     // Get the custom activity ID based on message direction
     const customActivityId = traffic === 'incoming' 
@@ -116,109 +115,4 @@ export default async function handler(req, res) {
       if (result.data?.create_item?.id) {
         return result.data.create_item.id;
       } else {
-        console.error('Failed to create lead:', result.errors);
-        return null;
-      }
-    }
-
-    // First attempt: Search Contacts board
-    mondayItemId = await searchInBoard(9643846519, 'contact_phone');
-    if (mondayItemId) {
-      foundInBoard = 'contacts';
-      console.log(`Found contact with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
-    }
-
-    // If not found in contacts, search leads
-    if (!mondayItemId) {
-      mondayItemId = await searchInBoard(9643846394, 'lead_phone');
-      if (mondayItemId) {
-        foundInBoard = 'leads';
-        console.log(`Found lead with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
-      }
-    }
-
-    // If still not found, wait 1 minute for Zapier to potentially create the contact
-    if (!mondayItemId) {
-      console.log('Contact not found, waiting 1 minute for Zapier...');
-      await new Promise(resolve => setTimeout(resolve, 60000));
-      
-      // Try contacts board again after delay
-      mondayItemId = await searchInBoard(9643846519, 'contact_phone');
-      if (mondayItemId) {
-        foundInBoard = 'contacts';
-        console.log(`Found contact after delay with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
-      }
-    }
-
-    // If still not found after delay, create new lead
-    if (!mondayItemId) {
-      mondayItemId = await createNewLead();
-      if (mondayItemId) {
-        foundInBoard = 'leads';
-        console.log(`Created new lead with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
-      }
-    }
-
-    // If we still don't have an ID, something went wrong
-    if (!mondayItemId) {
-      console.error('Failed to find or create contact/lead for phone:', cleanPhone);
-      return res.status(500).json({ 
-        error: 'Failed to find or create contact/lead',
-        phone: cleanPhone
-      });
-    }
-
-    // Create timeline item with just the title (no content field)
-    const escapedTitle = title.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
-    
-    const timelineQuery = {
-      query: `mutation {
-        create_timeline_item(
-          item_id: ${mondayItemId},
-          title: "${escapedTitle}",
-          timestamp: "${isoTimestamp}",
-          custom_activity_id: "${customActivityId}"
-        ) {
-          id
-          title
-        }
-      }`
-    };
-
-    const timelineResponse = await fetch('https://api.monday.com/v2', {
-      method: 'POST',
-      headers: {
-        'Authorization': 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQxMjcyMjUzNSwiYWFpIjoxMSwidWlkIjo2NDg2MzE3NCwiaWFkIjoiMjAyNC0wOS0xOVQwMDozNToxNS4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MjQ5NTk4ODEsInJnbiI6InVzZTEifQ.OfbCtB8GlkDmSZWRay92lXx4LdejaevSMVMSplYYLeU',
-        'Content-Type': 'application/json',
-        'API-Version': '2024-10'
-      },
-      body: JSON.stringify(timelineQuery)
-    });
-
-    const timelineResult = await timelineResponse.json();
-    console.log('Timeline creation result:', JSON.stringify(timelineResult, null, 2));
-
-    if (timelineResult.errors) {
-      return res.status(500).json({ 
-        error: 'Failed to create timeline item',
-        details: timelineResult.errors 
-      });
-    }
-
-    return res.status(200).json({ 
-      success: true,
-      message: 'Timeline item created successfully',
-      monday_id: mondayItemId,
-      found_in_board: foundInBoard,
-      timeline_item_id: timelineResult.data?.create_timeline_item?.id,
-      created_new_lead: foundInBoard === 'leads' && !foundInBoard
-    });
-
-  } catch (error) {
-    console.error('Error:', error);
-    return res.status(500).json({ 
-      error: 'Internal server error',
-      details: error.message 
-    });
-  }
-}
+        console.error('
