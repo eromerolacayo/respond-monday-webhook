@@ -32,14 +32,16 @@ export default async function handler(req, res) {
 
     // Search Contacts board for matching phone number
     const contactsQuery = {
-      query: `query {
+      query: `{
         boards(ids: [9643846519]) {
-          items {
-            id
-            name
-            column_values {
+          items_page {
+            items {
               id
-              text
+              name
+              column_values {
+                id
+                text
+              }
             }
           }
         }
@@ -60,8 +62,8 @@ export default async function handler(req, res) {
     console.log('Contacts board data:', JSON.stringify(contactsResult, null, 2));
 
     // Search through contacts for matching phone
-    if (contactsResult.data?.boards?.[0]?.items) {
-      for (const item of contactsResult.data.boards[0].items) {
+    if (contactsResult.data?.boards?.[0]?.items_page?.items) {
+      for (const item of contactsResult.data.boards[0].items_page.items) {
         const phoneColumn = item.column_values.find(col => col.id === 'contact_phone');
         if (phoneColumn && phoneColumn.text === cleanPhone) {
           mondayItemId = item.id;
@@ -74,14 +76,16 @@ export default async function handler(req, res) {
     // If not found in contacts, search leads
     if (!mondayItemId) {
       const leadsQuery = {
-        query: `query {
+        query: `{
           boards(ids: [9643846394]) {
-            items {
-              id
-              name
-              column_values {
+            items_page {
+              items {
                 id
-                text
+                name
+                column_values {
+                  id
+                  text
+                }
               }
             }
           }
@@ -102,8 +106,8 @@ export default async function handler(req, res) {
       console.log('Leads board data:', JSON.stringify(leadsResult, null, 2));
 
       // Search through leads for matching phone
-      if (leadsResult.data?.boards?.[0]?.items) {
-        for (const item of leadsResult.data.boards[0].items) {
+      if (leadsResult.data?.boards?.[0]?.items_page?.items) {
+        for (const item of leadsResult.data.boards[0].items_page.items) {
           const phoneColumn = item.column_values.find(col => col.id === 'lead_phone');
           if (phoneColumn && phoneColumn.text === cleanPhone) {
             mondayItemId = item.id;
