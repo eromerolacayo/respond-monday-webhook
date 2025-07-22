@@ -32,7 +32,7 @@ export default async function handler(req, res) {
    // Title with name and phone number for incoming, just agent name for outgoing
    const title = traffic === 'incoming' 
      ? `${personName} (${rawPhone})`
-     : `${agentName}: ${messageText}`;
+     : `${agentName}`;
    
    // Summary should be first 200 chars of message (within 255 limit)
    const summary = messageText ? 
