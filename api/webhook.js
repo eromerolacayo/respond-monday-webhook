@@ -1,5 +1,5 @@
 // api/webhook.js - Vercel serverless function
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   // Only accept POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -24,11 +24,19 @@ module.exports = async function handler(req, res) {
     // Convert timestamp from Unix to ISO format
     const isoTimestamp = new Date(timestamp).toISOString();
     
-    // Create content only - no title needed
-    const personName = `${firstName} ${lastName}`.trim();
-    const agentName = payload.contact?.assignee?.firstName || 'Abogados Catrachos USA';
+    // Create proper title, summary, and content structure
+    const personName = `${firstName} ${lastName}`.trim() || 'Unknown Contact';
+    const direction = traffic === 'incoming' ? 'Incoming' : 'Outgoing';
     
-    // Put the full message in content for expandable "Read more"
+    // Title should be short and descriptive
+    const title = `${direction} WhatsApp Message from ${personName}`;
+    
+    // Summary should be first 200 chars of message (within 255 limit)
+    const summary = messageText ? 
+      (messageText.length > 200 ? messageText.substring(0, 200) + '...' : messageText) : 
+      'No message content';
+    
+    // Content is the full message - this enables "Read more" functionality
     const content = messageText || 'No message content';
     
     // Get the custom activity ID based on message direction
@@ -89,7 +97,7 @@ module.exports = async function handler(req, res) {
         query: `mutation {
           create_item(
             board_id: 9643846394,
-            item_name: "${personName || 'Unknown Contact'}",
+            item_name: "${personName}",
             column_values: "${JSON.stringify({
               lead_phone: cleanPhone
             }).replace(/"/g, '\\"')}"
@@ -167,25 +175,25 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Create timeline item with both title and content
+    // Properly escape strings for GraphQL
+    const escapedTitle = title.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    const escapedSummary = summary.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
     const escapedContent = content.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
     
-    // Short title for the timeline entry
-    const direction = traffic === 'incoming' ? 'Received' : 'Sent';
-    const shortTitle = `WhatsApp ${direction}`;
-    const escapedTitle = shortTitle.replace(/"/g, '\\"');
-    
+    // Create timeline item with title, summary, and content
     const timelineQuery = {
       query: `mutation {
         create_timeline_item(
           item_id: ${mondayItemId},
           title: "${escapedTitle}",
+          summary: "${escapedSummary}",
           content: "${escapedContent}",
           timestamp: "${isoTimestamp}",
           custom_activity_id: "${customActivityId}"
         ) {
           id
           title
+          summary
           content
         }
       }`
@@ -217,7 +225,7 @@ module.exports = async function handler(req, res) {
       monday_id: mondayItemId,
       found_in_board: foundInBoard,
       timeline_item_id: timelineResult.data?.create_timeline_item?.id,
-      created_new_lead: foundInBoard === 'leads' && !foundInBoard
+      created_new_lead: foundInBoard === 'leads'
     });
 
   } catch (error) {
@@ -227,4 +235,4 @@ module.exports = async function handler(req, res) {
       details: error.message 
     });
   }
-};
+}
