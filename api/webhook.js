@@ -23,13 +23,13 @@ export default async function handler(req, res) {
     // Convert timestamp from Unix to ISO format
     const isoTimestamp = new Date(timestamp).toISOString();
     
-    // Create title - customer name for incoming, agent name for outgoing
+    // Create title with bold names
     const personName = `${firstName} ${lastName}`.trim();
     const agentName = payload.contact?.assignee?.firstName || 'Abogados Catrachos USA';
     
     const title = traffic === 'incoming' 
-      ? `${personName}: ${messageText}`
-      : `${agentName}: ${messageText}`;
+      ? `**${personName}**: ${messageText}`
+      : `**${agentName}**: ${messageText}`;
     
     // Get the custom activity ID based on message direction
     const customActivityId = traffic === 'incoming' 
@@ -131,7 +131,7 @@ export default async function handler(req, res) {
       });
     }
 
-    // Create timeline item with proper colors
+    // Create timeline item with bold names
     const timelineQuery = {
       query: `mutation {
         create_timeline_item(
