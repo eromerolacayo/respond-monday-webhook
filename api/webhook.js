@@ -30,7 +30,7 @@ export default async function handler(req, res) {
     
     // Put the entire message as the title - no separate content
     // This should make it display directly visible like manual entries
-    const title = messageText;
+    const title = messageText || 'No message content';
     
     // Get the custom activity ID based on message direction
     const customActivityId = traffic === 'incoming' 
