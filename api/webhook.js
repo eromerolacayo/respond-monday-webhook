@@ -24,18 +24,17 @@ export default async function handler(req, res) {
     // Convert timestamp from Unix to ISO format
     const isoTimestamp = new Date(timestamp).toISOString();
     
-    // Create title - truncated to prevent "Subject is too long" error
+    // Create title and body for timeline item
     const personName = `${firstName} ${lastName}`.trim();
     const agentName = payload.contact?.assignee?.firstName || 'Abogados Catrachos USA';
     
-    // Truncate message text to prevent Monday.com length errors (max 200 chars for safety)
-    const truncatedMessage = messageText.length > 150 
-      ? messageText.substring(0, 147) + '...' 
-      : messageText;
+    // Short title (just the name and start of message)
+    const shortTitle = traffic === 'incoming' 
+      ? `${personName}`
+      : `${agentName}`;
     
-    const title = traffic === 'incoming' 
-      ? `${personName}: ${truncatedMessage}`
-      : `${agentName}: ${truncatedMessage}`;
+    // Full message in body (no truncation needed)
+    const fullMessage = messageText;
     
     // Get the custom activity ID based on message direction
     const customActivityId = traffic === 'incoming' 
@@ -173,12 +172,13 @@ export default async function handler(req, res) {
       });
     }
 
-    // Create timeline item
+    // Create timeline item with both title and body
     const timelineQuery = {
       query: `mutation {
         create_timeline_item(
           item_id: ${mondayItemId},
-          title: "${title.replace(/"/g, '\\"')}",
+          title: "${shortTitle}",
+          body: "${fullMessage.replace(/"/g, '\\"').replace(/\n/g, '\\n')}",
           timestamp: "${isoTimestamp}",
           custom_activity_id: "${customActivityId}"
         ) {
