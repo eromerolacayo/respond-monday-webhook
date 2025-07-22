@@ -1,127 +1,225 @@
 // api/webhook.js - Vercel serverless function
 export default async function handler(req, res) {
+  // Only accept POST requests
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
   try {
-    const payload      = req.body;
-    const firstName    = payload.contact?.firstName  || '';
-    const lastName     = payload.contact?.lastName   || '';
-    const rawPhone     = payload.contact?.phone      || '';
-    const messageText  = payload.message?.message?.text || '';
-    const timestamp    = payload.message?.timestamp;
-    const traffic      = payload.message?.traffic;
-
-    /* ---------- helpers ---------- */
-    const cleanPhone   = rawPhone.replace(/^\+/, '');
+    const payload = req.body;
+    console.log('Received webhook:', JSON.stringify(payload, null, 2));
+    
+    // Extract data from Respond.io payload
+    const firstName = payload.contact?.firstName || '';
+    const lastName = payload.contact?.lastName || '';
+    const messageText = payload.message?.message?.text || '';
+    const timestamp = payload.message?.timestamp;
+    const traffic = payload.message?.traffic;
+    const rawPhone = payload.contact?.phone || '';
+    
+    // Clean phone number for Monday.com (remove + sign)
+    const cleanPhone = rawPhone.replace(/^\+/, '');
+    console.log('Cleaned phone number:', cleanPhone);
+    
+    // Convert timestamp from Unix to ISO format
     const isoTimestamp = new Date(timestamp).toISOString();
-    const name         = `${firstName} ${lastName}`.trim() || cleanPhone;
-    const assigneeName = payload.contact?.assignee?.firstName || 'Abogados Catrachos USA';
-
-    // strip WhatsApp markdown (* _ ~ `) so Monday won't show raw asterisks
-    const sanitize = txt => txt.replace(/[*_~`]/g, '');
-
-    const who   = traffic === 'incoming' ? name : assigneeName;
-    const title = `${who}: ${sanitize(messageText)}`;
-
-    const customActivityId =
-      traffic === 'incoming'
-        ? 'f7bdbbd8-2ea6-4fca-b5a8-9a71947a1d9e' // incoming blue
-        : 'e88c6cbf-d884-43f6-ad7c-a105646f4e5a'; // outgoing green
-
-    /* ---------- search both boards ---------- */
-    const BOARDS = [
-      { id: 9643846519, phoneCol: 'contact_phone' }, // Contacts
-      { id: 9643846394, phoneCol: 'lead_phone'    }  // Leads
-    ];
-
-    const mondayQuery = q =>
-      fetch('https://api.monday.com/v2', {
-        method : 'POST',
-        headers: {
-          Authorization : process.env.MONDAY_API_KEY,
-          'Content-Type': 'application/json',
-          'API-Version' : '2024-10'
-        },
-        body: JSON.stringify({ query: q })
-      }).then(r => r.json());
+    
+    // Create title - truncated to prevent "Subject is too long" error
+    const personName = `${firstName} ${lastName}`.trim();
+    const agentName = payload.contact?.assignee?.firstName || 'Abogados Catrachos USA';
+    
+    // Truncate message text to prevent Monday.com length errors (max 200 chars for safety)
+    const truncatedMessage = messageText.length > 150 
+      ? messageText.substring(0, 147) + '...' 
+      : messageText;
+    
+    const title = traffic === 'incoming' 
+      ? `${personName}: ${truncatedMessage}`
+      : `${agentName}: ${truncatedMessage}`;
+    
+    // Get the custom activity ID based on message direction
+    const customActivityId = traffic === 'incoming' 
+      ? 'f7bdbbd8-2ea6-4fca-b5a8-9a71947a1d9e'  // Blue for incoming
+      : 'e88c6cbf-d884-43f6-ad7c-a105646f4e5a';  // Green for outgoing
 
     let mondayItemId = null;
+    let foundInBoard = null;
 
-    for (const { id, phoneCol } of BOARDS) {
-      const q = `{
-        boards(ids:[${id}]) {
-          items_page {
-            items {
-              id
-              column_values { id text }
+    // Function to search for contact by phone
+    async function searchInBoard(boardId, phoneColumnId) {
+      const query = {
+        query: `{
+          boards(ids: [${boardId}]) {
+            items_page {
+              items {
+                id
+                name
+                column_values {
+                  id
+                  text
+                }
+              }
             }
           }
+        }`
+      };
+
+      const response = await fetch('https://api.monday.com/v2', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQxMjcyMjUzNSwiYWFpIjoxMSwidWlkIjo2NDg2MzE3NCwiaWFkIjoiMjAyNC0wOS0xOVQwMDozNToxNS4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MjQ5NTk4ODEsInJnbiI6InVzZTEifQ.OfbCtB8GlkDmSZWRay92lXx4LdejaevSMVMSplYYLeU',
+          'Content-Type': 'application/json',
+          'API-Version': '2024-10'
+        },
+        body: JSON.stringify(query)
+      });
+
+      const result = await response.json();
+
+      if (result.data?.boards?.[0]?.items_page?.items) {
+        for (const item of result.data.boards[0].items_page.items) {
+          const phoneColumn = item.column_values.find(col => col.id === phoneColumnId);
+          if (phoneColumn && phoneColumn.text === cleanPhone) {
+            return item.id;
+          }
         }
-      }`;
-      const data = await mondayQuery(q);
-      const items = data.data?.boards?.[0]?.items_page?.items || [];
-      const hit = items.find(it => it.column_values
-        .some(cv => cv.id === phoneCol && cv.text === cleanPhone));
-      if (hit) {
-        mondayItemId = hit.id;
-        break;
+      }
+      return null;
+    }
+
+    // Function to create new lead
+    async function createNewLead() {
+      console.log('Creating new lead for phone:', cleanPhone);
+      
+      const createLeadMutation = {
+        query: `mutation {
+          create_item(
+            board_id: 9643846394,
+            item_name: "${personName || 'Unknown Contact'}",
+            column_values: "${JSON.stringify({
+              lead_phone: cleanPhone
+            }).replace(/"/g, '\\"')}"
+          ) {
+            id
+          }
+        }`
+      };
+
+      const response = await fetch('https://api.monday.com/v2', {
+        method: 'POST',
+        headers: {
+          'Authorization': 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQxMjcyMjUzNSwiYWFpIjoxMSwidWlkIjo2NDg2MzE3NCwiaWFkIjoiMjAyNC0wOS0xOVQwMDozNToxNS4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MjQ5NTk4ODEsInJnbiI6InVzZTEifQ.OfbCtB8GlkDmSZWRay92lXx4LdejaevSMVMSplYYLeU',
+          'Content-Type': 'application/json',
+          'API-Version': '2024-10'
+        },
+        body: JSON.stringify(createLeadMutation)
+      });
+
+      const result = await response.json();
+      console.log('Lead creation result:', JSON.stringify(result, null, 2));
+
+      if (result.data?.create_item?.id) {
+        return result.data.create_item.id;
+      } else {
+        console.error('Failed to create lead:', result.errors);
+        return null;
       }
     }
 
-    /* ---------- auto-create contact if missing ---------- */
+    // First attempt: Search Contacts board
+    mondayItemId = await searchInBoard(9643846519, 'contact_phone');
+    if (mondayItemId) {
+      foundInBoard = 'contacts';
+      console.log(`Found contact with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
+    }
+
+    // If not found in contacts, search leads
     if (!mondayItemId) {
-      console.log(`Phone not found, auto-creating contact: ${cleanPhone}`);
-
-      const columnVals = JSON.stringify({
-        contact_phone: cleanPhone        // <-- column ID for phone
-        // add more initial columns if you like
-      });
-
-      const createMutation = `mutation {
-        create_item (
-          board_id: 9643846519,          // Contacts board
-          item_name: "${name.replace(/"/g, '\\"')}",
-          column_values: "${columnVals.replace(/"/g, '\\"')}"
-        ) { id }
-      }`;
-
-      const createRes = await mondayQuery(createMutation);
-      mondayItemId = createRes.data?.create_item?.id;
-
-      if (!mondayItemId) {
-        throw new Error('Auto-create failed; no ID returned');
+      mondayItemId = await searchInBoard(9643846394, 'lead_phone');
+      if (mondayItemId) {
+        foundInBoard = 'leads';
+        console.log(`Found lead with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
       }
     }
 
-    /* ---------- create timeline entry ---------- */
-    const timelineMutation = `mutation {
-      create_timeline_item(
-        item_id: ${mondayItemId},
-        title: "${title.replace(/"/g, '\\"')}",
-        timestamp: "${isoTimestamp}",
-        custom_activity_id: "${customActivityId}"
-      ) { id }
-    }`;
+    // If still not found, wait 1 minute for Zapier to potentially create the contact
+    if (!mondayItemId) {
+      console.log('Contact not found, waiting 1 minute for Zapier...');
+      await new Promise(resolve => setTimeout(resolve, 60000));
+      
+      // Try contacts board again after delay
+      mondayItemId = await searchInBoard(9643846519, 'contact_phone');
+      if (mondayItemId) {
+        foundInBoard = 'contacts';
+        console.log(`Found contact after delay with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
+      }
+    }
 
-    const timelineRes = await mondayQuery(timelineMutation);
+    // If still not found after delay, create new lead
+    if (!mondayItemId) {
+      mondayItemId = await createNewLead();
+      if (mondayItemId) {
+        foundInBoard = 'leads';
+        console.log(`Created new lead with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
+      }
+    }
 
-    if (timelineRes.errors) {
-      console.error('Timeline error', timelineRes.errors);
-      return res.status(500).json({
-        error  : 'Failed to create timeline item',
-        details: timelineRes.errors
+    // If we still don't have an ID, something went wrong
+    if (!mondayItemId) {
+      console.error('Failed to find or create contact/lead for phone:', cleanPhone);
+      return res.status(500).json({ 
+        error: 'Failed to find or create contact/lead',
+        phone: cleanPhone
       });
     }
 
-    return res.status(200).json({ success: true, monday_id: mondayItemId });
+    // Create timeline item
+    const timelineQuery = {
+      query: `mutation {
+        create_timeline_item(
+          item_id: ${mondayItemId},
+          title: "${title.replace(/"/g, '\\"')}",
+          timestamp: "${isoTimestamp}",
+          custom_activity_id: "${customActivityId}"
+        ) {
+          id
+        }
+      }`
+    };
 
-  } catch (err) {
-    console.error('Webhook error', err);
-    return res.status(500).json({
-      error  : 'Internal server error',
-      details: err.message
+    const timelineResponse = await fetch('https://api.monday.com/v2', {
+      method: 'POST',
+      headers: {
+        'Authorization': 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQxMjcyMjUzNSwiYWFpIjoxMSwidWlkIjo2NDg2MzE3NCwiaWFkIjoiMjAyNC0wOS0xOVQwMDozNToxNS4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MjQ5NTk4ODEsInJnbiI6InVzZTEifQ.OfbCtB8GlkDmSZWRay92lXx4LdejaevSMVMSplYYLeU',
+        'Content-Type': 'application/json',
+        'API-Version': '2024-10'
+      },
+      body: JSON.stringify(timelineQuery)
+    });
+
+    const timelineResult = await timelineResponse.json();
+    console.log('Timeline creation result:', JSON.stringify(timelineResult, null, 2));
+
+    if (timelineResult.errors) {
+      return res.status(500).json({ 
+        error: 'Failed to create timeline item',
+        details: timelineResult.errors 
+      });
+    }
+
+    return res.status(200).json({ 
+      success: true,
+      message: 'Timeline item created successfully',
+      monday_id: mondayItemId,
+      found_in_board: foundInBoard,
+      created_new_lead: foundInBoard === 'leads' && !foundInBoard
+    });
+
+  } catch (error) {
+    console.error('Error:', error);
+    return res.status(500).json({ 
+      error: 'Internal server error',
+      details: error.message 
     });
   }
 }
