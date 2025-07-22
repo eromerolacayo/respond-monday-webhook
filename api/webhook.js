@@ -24,13 +24,19 @@ export default async function handler(req, res) {
     // Convert timestamp from Unix to ISO format
     const isoTimestamp = new Date(timestamp).toISOString();
     
-    // Create clean title with names and phone for incoming
-    const personName = `${firstName} ${lastName}`.trim() || 'Unknown Contact';
-    const agentName = payload.contact?.assignee?.firstName || 'Abogados Catrachos USA';
+    // Create proper title, summary, and content structure
+const title = traffic === 'incoming'  ? `${personName} (${rawPhone}): ${messageText}`  : `${agentName}: ${messageText}`;
     
-    const title = traffic === 'incoming' 
-      ? `${personName} (${rawPhone}): ${messageText}`
-      : `${agentName}: ${messageText}`;
+    // Title should be short and descriptive
+    const title = `${direction} WhatsApp Message from ${personName}`;
+    
+    // Summary should be first 200 chars of message (within 255 limit)
+    const summary = messageText ? 
+      (messageText.length > 200 ? messageText.substring(0, 200) + '...' : messageText) : 
+      'No message content';
+    
+    // Content is the full message - this enables "Read more" functionality
+    const content = messageText || 'No message content';
     
     // Get the custom activity ID based on message direction
     const customActivityId = traffic === 'incoming' 
@@ -170,13 +176,17 @@ export default async function handler(req, res) {
 
     // Properly escape strings for GraphQL
     const escapedTitle = title.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    const escapedSummary = summary.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    const escapedContent = content.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
     
-    // Create timeline item
+    // Create timeline item with title, summary, and content
     const timelineQuery = {
       query: `mutation {
         create_timeline_item(
           item_id: ${mondayItemId},
           title: "${escapedTitle}",
+          summary: "${escapedSummary}",
+          content: "${escapedContent}",
           timestamp: "${isoTimestamp}",
           custom_activity_id: "${customActivityId}"
         ) {
