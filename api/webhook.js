@@ -13,7 +13,7 @@ export default async function handler(req, res) {
     const lastName = payload.contact?.lastName || '';
     const messageText = payload.message?.message?.text || '';
     const timestamp = payload.message?.timestamp;
-    const traffic = payload.message?.traffic; // 'incoming' or 'outgoing'
+    const traffic = payload.message?.traffic;
     const rawPhone = payload.contact?.phone || '';
     
     // Clean phone number for Monday.com (remove + sign)
@@ -30,79 +30,96 @@ export default async function handler(req, res) {
 
     let mondayItemId = null;
 
-    // First, search Contacts board
-    const contactsSearchQuery = {
+    // Search Contacts board for matching phone number
+    const contactsQuery = {
       query: `query {
-        items_by_column_values(
-          board_id: 9643846519,
-          column_id: "contact_phone",
-          column_value: "${cleanPhone}"
-        ) {
-          id
-          name
+        boards(ids: 9643846519) {
+          items {
+            id
+            name
+            column_values(ids: "contact_phone") {
+              text
+            }
+          }
         }
       }`
     };
 
-    const contactsSearchResponse = await fetch('https://api.monday.com/v2', {
+    const contactsResponse = await fetch('https://api.monday.com/v2', {
       method: 'POST',
       headers: {
         'Authorization': 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQxMjcyMjUzNSwiYWFpIjoxMSwidWlkIjo2NDg2MzE3NCwiaWFkIjoiMjAyNC0wOS0xOVQwMDozNToxNS4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MjQ5NTk4ODEsInJnbiI6InVzZTEifQ.OfbCtB8GlkDmSZWRay92lXx4LdejaevSMVMSplYYLeU',
         'Content-Type': 'application/json',
         'API-Version': '2024-10'
       },
-      body: JSON.stringify(contactsSearchQuery)
+      body: JSON.stringify(contactsQuery)
     });
 
-    const contactsResult = await contactsSearchResponse.json();
-    console.log('Contacts search result:', contactsResult);
+    const contactsResult = await contactsResponse.json();
+    console.log('Contacts board data:', contactsResult);
 
-    if (contactsResult.data?.items_by_column_values?.length) {
-      mondayItemId = contactsResult.data.items_by_column_values[0].id;
-      console.log('Found in Contacts board, ID:', mondayItemId);
-    } else {
-      // If not found in Contacts, search Leads board
-      const leadsSearchQuery = {
+    // Search through contacts for matching phone
+    if (contactsResult.data?.boards?.[0]?.items) {
+      for (const item of contactsResult.data.boards[0].items) {
+        const phoneValue = item.column_values[0]?.text;
+        if (phoneValue === cleanPhone) {
+          mondayItemId = item.id;
+          console.log(`Found contact with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
+          break;
+        }
+      }
+    }
+
+    // If not found in contacts, search leads
+    if (!mondayItemId) {
+      const leadsQuery = {
         query: `query {
-          items_by_column_values(
-            board_id: 9643846394,
-            column_id: "lead_phone",
-            column_value: "${cleanPhone}"
-          ) {
-            id
-            name
+          boards(ids: 9643846394) {
+            items {
+              id
+              name
+              column_values(ids: "lead_phone") {
+                text
+              }
+            }
           }
         }`
       };
 
-      const leadsSearchResponse = await fetch('https://api.monday.com/v2', {
+      const leadsResponse = await fetch('https://api.monday.com/v2', {
         method: 'POST',
         headers: {
           'Authorization': 'eyJhbGciOiJIUzI1NiJ9.eyJ0aWQiOjQxMjcyMjUzNSwiYWFpIjoxMSwidWlkIjo2NDg2MzE3NCwiaWFkIjoiMjAyNC0wOS0xOVQwMDozNToxNS4wMDBaIiwicGVyIjoibWU6d3JpdGUiLCJhY3RpZCI6MjQ5NTk4ODEsInJnbiI6InVzZTEifQ.OfbCtB8GlkDmSZWRay92lXx4LdejaevSMVMSplYYLeU',
           'Content-Type': 'application/json',
           'API-Version': '2024-10'
         },
-        body: JSON.stringify(leadsSearchQuery)
+        body: JSON.stringify(leadsQuery)
       });
 
-      const leadsResult = await leadsSearchResponse.json();
-      console.log('Leads search result:', leadsResult);
+      const leadsResult = await leadsResponse.json();
+      console.log('Leads board data:', leadsResult);
 
-      if (leadsResult.data?.items_by_column_values?.length) {
-        mondayItemId = leadsResult.data.items_by_column_values[0].id;
-        console.log('Found in Leads board, ID:', mondayItemId);
+      // Search through leads for matching phone
+      if (leadsResult.data?.boards?.[0]?.items) {
+        for (const item of leadsResult.data.boards[0].items) {
+          const phoneValue = item.column_values[0]?.text;
+          if (phoneValue === cleanPhone) {
+            mondayItemId = item.id;
+            console.log(`Found lead with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
+            break;
+          }
+        }
       }
     }
 
-    // Check if customer/lead was found in either board
     if (!mondayItemId) {
-      console.log('No Monday customer/lead found with phone:', cleanPhone);
+      console.log('Phone number not found in either board:', cleanPhone);
       return res.status(200).json({ 
-        message: 'Customer/lead not found in Monday.com, skipping timeline creation'
+        message: 'Phone number not found in Monday.com'
       });
     }
 
-    // Create GraphQL mutation for timeline
+    // Create timeline item
     const timelineQuery = {
       query: `mutation {
         create_timeline_item(
@@ -117,7 +134,6 @@ export default async function handler(req, res) {
       }`
     };
 
-    // Send timeline creation to Monday.com API
     const timelineResponse = await fetch('https://api.monday.com/v2', {
       method: 'POST',
       headers: {
@@ -129,27 +145,23 @@ export default async function handler(req, res) {
     });
 
     const timelineResult = await timelineResponse.json();
-    console.log('Monday.com timeline response:', timelineResult);
+    console.log('Timeline creation result:', timelineResult);
 
-    // Check if timeline creation was successful
     if (timelineResult.errors) {
-      console.error('Monday.com timeline errors:', timelineResult.errors);
       return res.status(500).json({ 
         error: 'Failed to create timeline item',
         details: timelineResult.errors 
       });
     }
 
-    // Return success to Respond.io
     return res.status(200).json({ 
       success: true,
-      customer_id: mondayItemId,
-      timeline_item_id: timelineResult.data?.create_timeline_item?.id,
-      message: 'Timeline item created successfully'
+      message: 'Timeline item created successfully',
+      monday_id: mondayItemId
     });
 
   } catch (error) {
-    console.error('Error processing webhook:', error);
+    console.error('Error:', error);
     return res.status(500).json({ 
       error: 'Internal server error',
       details: error.message 
