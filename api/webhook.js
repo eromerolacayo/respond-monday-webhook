@@ -24,17 +24,17 @@ export default async function handler(req, res) {
     // Convert timestamp from Unix to ISO format
     const isoTimestamp = new Date(timestamp).toISOString();
     
-    // Create title and body for timeline item
+    // Create title and content - separate them properly
     const personName = `${firstName} ${lastName}`.trim();
     const agentName = payload.contact?.assignee?.firstName || 'Abogados Catrachos USA';
     
-    // Short title (just the name and start of message)
-    const shortTitle = traffic === 'incoming' 
-      ? `${personName}`
-      : `${agentName}`;
+    // For the title, keep it short (this is what shows as the header)
+    const title = traffic === 'incoming' 
+      ? `Message from ${personName || 'Unknown Contact'}`
+      : `Reply to ${personName || 'Unknown Contact'}`;
     
-    // Full message in body (no truncation needed)
-    const fullMessage = messageText;
+    // For content, include the full message (this is what shows in the expandable area)
+    const content = messageText; // Don't truncate the content - let Monday.com handle display
     
     // Get the custom activity ID based on message direction
     const customActivityId = traffic === 'incoming' 
@@ -172,17 +172,22 @@ export default async function handler(req, res) {
       });
     }
 
-    // Create timeline item with both title and body
+    // Create timeline item with proper escaping for content
+    const escapedContent = content.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    const escapedTitle = title.replace(/"/g, '\\"');
+    
     const timelineQuery = {
       query: `mutation {
         create_timeline_item(
           item_id: ${mondayItemId},
-          title: "${shortTitle}",
-          body: "${fullMessage.replace(/"/g, '\\"').replace(/\n/g, '\\n')}",
+          title: "${escapedTitle}",
+          content: "${escapedContent}",
           timestamp: "${isoTimestamp}",
           custom_activity_id: "${customActivityId}"
         ) {
           id
+          title
+          content
         }
       }`
     };
@@ -212,6 +217,7 @@ export default async function handler(req, res) {
       message: 'Timeline item created successfully',
       monday_id: mondayItemId,
       found_in_board: foundInBoard,
+      timeline_item_id: timelineResult.data?.create_timeline_item?.id,
       created_new_lead: foundInBoard === 'leads' && !foundInBoard
     });
 
