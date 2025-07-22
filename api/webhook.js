@@ -28,13 +28,9 @@ export default async function handler(req, res) {
     const personName = `${firstName} ${lastName}`.trim();
     const agentName = payload.contact?.assignee?.firstName || 'Abogados Catrachos USA';
     
-    // For the title, keep it short (this is what shows as the header)
-    const title = traffic === 'incoming' 
-      ? `Message from ${personName || 'Unknown Contact'}`
-      : `Reply to ${personName || 'Unknown Contact'}`;
-    
-    // For content, include the full message (this is what shows in the expandable area)
-    const content = messageText; // Don't truncate the content - let Monday.com handle display
+    // Put the entire message as the title - no separate content
+    // This should make it display directly visible like manual entries
+    const title = messageText;
     
     // Get the custom activity ID based on message direction
     const customActivityId = traffic === 'incoming' 
@@ -172,16 +168,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // Create timeline item with proper escaping for content
-    const escapedContent = content.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
-    const escapedTitle = title.replace(/"/g, '\\"');
+    // Create timeline item with just the title (no content field)
+    const escapedTitle = title.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
     
     const timelineQuery = {
       query: `mutation {
         create_timeline_item(
           item_id: ${mondayItemId},
           title: "${escapedTitle}",
-          content: "${escapedContent}",
           timestamp: "${isoTimestamp}",
           custom_activity_id: "${customActivityId}"
         ) {
