@@ -33,11 +33,12 @@ export default async function handler(req, res) {
     // Search Contacts board for matching phone number
     const contactsQuery = {
       query: `query {
-        boards(ids: 9643846519) {
+        boards(ids: [9643846519]) {
           items {
             id
             name
-            column_values(ids: "contact_phone") {
+            column_values {
+              id
               text
             }
           }
@@ -56,13 +57,13 @@ export default async function handler(req, res) {
     });
 
     const contactsResult = await contactsResponse.json();
-    console.log('Contacts board data:', contactsResult);
+    console.log('Contacts board data:', JSON.stringify(contactsResult, null, 2));
 
     // Search through contacts for matching phone
     if (contactsResult.data?.boards?.[0]?.items) {
       for (const item of contactsResult.data.boards[0].items) {
-        const phoneValue = item.column_values[0]?.text;
-        if (phoneValue === cleanPhone) {
+        const phoneColumn = item.column_values.find(col => col.id === 'contact_phone');
+        if (phoneColumn && phoneColumn.text === cleanPhone) {
           mondayItemId = item.id;
           console.log(`Found contact with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
           break;
@@ -74,11 +75,12 @@ export default async function handler(req, res) {
     if (!mondayItemId) {
       const leadsQuery = {
         query: `query {
-          boards(ids: 9643846394) {
+          boards(ids: [9643846394]) {
             items {
               id
               name
-              column_values(ids: "lead_phone") {
+              column_values {
+                id
                 text
               }
             }
@@ -97,13 +99,13 @@ export default async function handler(req, res) {
       });
 
       const leadsResult = await leadsResponse.json();
-      console.log('Leads board data:', leadsResult);
+      console.log('Leads board data:', JSON.stringify(leadsResult, null, 2));
 
       // Search through leads for matching phone
       if (leadsResult.data?.boards?.[0]?.items) {
         for (const item of leadsResult.data.boards[0].items) {
-          const phoneValue = item.column_values[0]?.text;
-          if (phoneValue === cleanPhone) {
+          const phoneColumn = item.column_values.find(col => col.id === 'lead_phone');
+          if (phoneColumn && phoneColumn.text === cleanPhone) {
             mondayItemId = item.id;
             console.log(`Found lead with phone ${cleanPhone}, Monday ID: ${mondayItemId}`);
             break;
@@ -145,7 +147,7 @@ export default async function handler(req, res) {
     });
 
     const timelineResult = await timelineResponse.json();
-    console.log('Timeline creation result:', timelineResult);
+    console.log('Timeline creation result:', JSON.stringify(timelineResult, null, 2));
 
     if (timelineResult.errors) {
       return res.status(500).json({ 
