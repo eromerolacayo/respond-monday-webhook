@@ -23,10 +23,16 @@ export default async function handler(req, res) {
     // Convert timestamp from Unix to ISO format
     const isoTimestamp = new Date(timestamp).toISOString();
     
-    // Create title based on message direction
+    // Put everything in the title so it shows directly (no "read more")
+    const personName = `${firstName} ${lastName}`.trim();
     const title = traffic === 'incoming' 
-      ? `WhatsApp from ${firstName} ${lastName}`.trim()
-      : `WhatsApp to ${firstName} ${lastName}`.trim();
+      ? `Mensaje entrante - ${personName}: ${messageText}`
+      : `Mensaje saliente - ${personName}: ${messageText}`;
+    
+    // Get the custom activity ID based on message direction
+    const customActivityId = traffic === 'incoming' 
+      ? 'f7bdbbd8-2ea6-4fca-b5a8-9a71947a1d9e'  // Blue for incoming
+      : 'e88c6cbf-d884-43f6-ad7c-a105646f4e5a';  // Green for outgoing
 
     let mondayItemId = null;
 
@@ -59,7 +65,6 @@ export default async function handler(req, res) {
     });
 
     const contactsResult = await contactsResponse.json();
-    console.log('Contacts board data:', JSON.stringify(contactsResult, null, 2));
 
     // Search through contacts for matching phone
     if (contactsResult.data?.boards?.[0]?.items_page?.items) {
@@ -103,7 +108,6 @@ export default async function handler(req, res) {
       });
 
       const leadsResult = await leadsResponse.json();
-      console.log('Leads board data:', JSON.stringify(leadsResult, null, 2));
 
       // Search through leads for matching phone
       if (leadsResult.data?.boards?.[0]?.items_page?.items) {
@@ -125,15 +129,14 @@ export default async function handler(req, res) {
       });
     }
 
-    // Create timeline item
+    // Create timeline item with proper colors
     const timelineQuery = {
       query: `mutation {
         create_timeline_item(
           item_id: ${mondayItemId},
-          title: "${title}",
+          title: "${title.replace(/"/g, '\\"')}",
           timestamp: "${isoTimestamp}",
-          custom_activity_id: "6cf1cd71-b853-4e67-a43b-9ff9a0517bf0",
-          content: "${messageText.replace(/"/g, '\\"')}"
+          custom_activity_id: "${customActivityId}"
         ) {
           id
         }
