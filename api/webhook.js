@@ -167,18 +167,25 @@ module.exports = async function handler(req, res) {
       });
     }
 
-    // Create timeline item with content only (no title)
+    // Create timeline item with both title and content
     const escapedContent = content.replace(/"/g, '\\"').replace(/\n/g, '\\n').replace(/\r/g, '\\r');
+    
+    // Short title for the timeline entry
+    const direction = traffic === 'incoming' ? 'Received' : 'Sent';
+    const shortTitle = `WhatsApp ${direction}`;
+    const escapedTitle = shortTitle.replace(/"/g, '\\"');
     
     const timelineQuery = {
       query: `mutation {
         create_timeline_item(
           item_id: ${mondayItemId},
+          title: "${escapedTitle}",
           content: "${escapedContent}",
           timestamp: "${isoTimestamp}",
           custom_activity_id: "${customActivityId}"
         ) {
           id
+          title
           content
         }
       }`
